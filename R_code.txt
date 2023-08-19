@@ -1,0 +1,433 @@
+##################################################################################
+################################ General Notes ###################################
+##################################################################################
+## Author - Aubhev Gahlout
+## When we summarize by RNs (calculate the % of RNs that work...)
+# We use rows of data that do not have a BDP associated with because they're not treatments
+
+## When we summarize by % Hours - we're only using rows that have BDP's
+
+## The only time this would be a problem is if we have RNs only doing non-treatment work 
+# in a given hopsital - and that woudn't make sense given that they're RN's
+
+# This is something I can check in the data later.
+
+##################################################################################
+################################ Data Prep #######################################
+##################################################################################
+
+
+install.packages("dplyr")
+library(dplyr)
+
+setwd("C:/Users/agahlout/Desktop/AcuteScenarios")
+
+dax <- read.csv("DaxData.csv", header = TRUE)
+
+hosp <- read.csv("HosptialMap.csv", header = TRUE)
+
+hosp.trunc <- select(hosp, c("HID", "Region"))
+
+
+#class(dax$HID)
+#class(hosp$HID)
+#class(hosp.trunc$HID)
+
+hosp$HID <- as.character(hosp$HID)
+hosp$HID <- as.integer(hosp$HID)
+
+# prints unique HIDs in each dataset so we can see they're the same variable
+unique(dax$HID)
+unique(hosp$HID)
+
+## this shows that when we select this hopsital from the dax data that it brings up only
+# one row in the hospital data - so one HID to one hospital - good.
+
+#subset(hosp.trunc, HID == 29546)
+
+## let's make HID an integer in each dataset so we can use HID to join
+# if they're factors and they don't have the same levels, we get warning message,
+# saying that R is coercing HID into a character - this is probably find, but if we make it an 
+# integer, we don't get a warning message.
+
+
+hosp.trunc$HID <- as.character(hosp.trunc$HID)
+hosp.trunc$HID <- as.integer(hosp.trunc$HID)
+
+dax$HID <- as.character(dax$HID)
+dax$HID <- as.integer(dax$HID)
+
+## join Region into to dax data
+data <- left_join(dax, hosp.trunc, by = "HID")
+
+# checking to be sure each row has an assigned Region
+nrow(subset(data, is.na(Region)))
+
+class(data$EMPID)
+
+## make EMPID an integer so that we can filter and only include 
+# EMPIDs that are > 0 - gets rid of EMPID error inputs
+data$EMPID <- as.character(data$EMPID)
+data$EMPID <- as.integer(data$EMPID)
+
+data <- subset(data, EMPID > 0)
+
+## make EMPID a factor again so that we can group by it below.
+data$EMPID <- as.character(data$EMPID)
+data$EMPID <- as.factor(data$EMPID)
+
+
+## let's pull a 13 week date range.
+## let's pull 3/10 - 6/8
+
+data$StartDate <- as.Date(data$StartDate, "%m/%d/%Y")
+
+min(data$StartDate, na.rm = TRUE)
+max(data$StartDate, na.rm = TRUE)
+
+data <- subset(data, StartDate >= "2019-03-10" & StartDate <= "2019-06-08")
+
+
+
+
+##################################################################################
+################################ Scenario 1 ######################################
+##################################################################################
+
+# % of RNs in each region who worked at more than one hosptial within the region
+
+data.s1 <- group_by(data, EMPID, Region)
+data.s1 <- summarise(data.s1, NumHosp = n_distinct(HID))
+
+head(data.s1)
+class(data.s1$EMPID)
+
+data.s1.1 <- group_by(data.s1, Region)
+data.s1.1 <- summarise(data.s1.1, Count = n(), NumMultHosp = length(EMPID[NumHosp > 1]))
+
+scenario1 <- mutate(data.s1.1, PercMultHosp = round((NumMultHosp/Count)*100,2))
+
+head(scenario1)
+
+## Let's make sure we have the correct number of regions in our scenario summary
+# 10 Regions in CA!
+nrow(scenario1)
+length(unique(data$Region))
+
+##################################################################################
+################################## Identify Home Hospital ########################
+##################################################################################
+
+class(data$BDPTime)
+
+data$BDPTime <- as.character(data$BDPTime)
+data$BDPTime <- as.numeric(data$BDPTime)
+
+class(data$HID)
+
+data$HID <- as.character(data$HID)
+data$HID <- as.factor(data$HID)
+
+class(data$EMPID)
+
+
+data.h1 <- group_by(data, EMPID, HID, Region)
+data.h1 <- summarise(data.h1, TotalHospHours = sum(BDPTime, na.rm = TRUE))
+
+data.h2 <- group_by(data.h1, EMPID)
+data.h2 <- summarise(data.h2, HomeHID = HID[which.max(TotalHospHours)])
+
+## rename HomeHID to HID so that we can join region on it, then we'll change it back
+
+colnames(data.h2)[2] <- "HID"
+
+head(data.h2)
+
+## make sure both HIDs are integers so we can join on it
+class(hosp.trunc$HID)
+class(data.h2$HID)
+
+data.h2$HID <- as.character(data.h2$HID)
+data.h2$HID <- as.integer(data.h2$HID)
+
+## join region to Home Hospital
+HomeHospitalList <- left_join(data.h2, hosp.trunc, by = "HID")
+
+head(HomeHospitalList)
+
+## rename columns in home hospital list to reflect home hospital
+
+colnames(HomeHospitalList)[2] <- "HomeHID"
+
+colnames(HomeHospitalList)[3] <- "HomeHIDRegion"
+
+head(HomeHospitalList)
+
+## let's make sure we don't have any repeat EMPIDs in the this,
+# so be sure we only have one Home Hospital per EMPID
+# they should both be the same number - 810 in this case
+nrow(HomeHospitalList)
+class(HomeHospitalList$EMPID)
+length(unique(HomeHospitalList$EMPID))
+
+##################################################################################
+######################## Join Home Hospital Back into Data #######################
+##################################################################################
+
+class(HomeHospitalList$EMPID)
+class(data$EMPID)
+
+
+data$EMPID <- as.character(data$EMPID)
+data$EMPID <- as.integer(data$EMPID)
+
+HomeHospitalList$EMPID <- as.character(HomeHospitalList$EMPID)
+HomeHospitalList$EMPID <- as.integer(HomeHospitalList$EMPID)
+
+data <- left_join(data, HomeHospitalList, by = "EMPID")
+
+## the number of rows in which Region does not equal HomeHIDRegion - 
+# this indicates the number of treatments that RNs perform outside their "Home Region"
+# here it's 224 out of 117,497 (0.2%)
+nrow(subset(data, Region != HomeHIDRegion))
+
+##################################################################################
+################################ Scenario 2 ######################################
+##################################################################################
+
+## The % of RNs whose home hospital is X, who worked in at least one other hospital in the 
+# Region during the last 13 weeks.
+
+
+## first be sure the variables across which we're summarizing are factors
+class(data$HID)
+class(data$EMPID)
+class(data$HomeHID)
+class(data$HomeHIDRegion)
+
+data$EMPID <- as.character(data$EMPID)
+data$EMPID <- as.factor(data$EMPID)
+
+data$HomeHID <- as.character(data$HomeHID)
+data$HomeHID <- as.factor(data$HomeHID)
+
+
+## because we're only conerned here with RNs working within the Region of their given 
+# home hospital - I'm going to filter the above data so that it only includes rows where
+## Region = HomeHIDRegion
+
+data.s2 <- filter(data, Region == HomeHIDRegion)
+
+
+## get the number of distinct hospitals RNs are working 
+# it's implied that it's within that region b/c of the filter above
+data.s2.1 <- group_by(data.s2, EMPID, HomeHID, HomeHIDRegion)
+data.s2.1 <- summarise(data.s2.1, NumHosp = n_distinct(HID))
+
+## let's do a check and be sure we don't have any repeat EMPIDs in here
+# 810 so we're good
+nrow(data.s2.1)
+
+## now we summarize by HomeHID and count the total number of RNs, 
+# the number of RNs that worked in more than one hopsital, and then the percentage
+data.s2.2 <- group_by(data.s2.1, HomeHID, HomeHIDRegion)
+scenario2 <- summarise(data.s2.2, Count = n(), NumMultHosp = length(EMPID[NumHosp > 1]), 
+                       PercMultHosp = round ( ((length(EMPID[NumHosp > 1])/n()) *100) ,2) )
+
+## let's do a check and make sure there are no repeat HomeHIDs
+# we have 100 Home HIDs
+length(unique(data$HomeHID))
+nrow(scenario2)
+
+## How many HIDs do we have total?
+# 147, so there are 47 hospitals that are no one's home.
+length(unique(data$HID))
+
+
+##################################################################################
+################################ Scenario 3.1 & 3.2 ##############################
+##################################################################################
+
+# For all RNs whose Home Hospital is X, the % of hours worked outside of hopsital X,
+# but within the Region during the last 13 weeks.
+
+## 3.1 is at the EMPID Scale
+## 3.2 is at the Home Hospital Scale
+
+
+## first be sure the variables across which we're summarizing are factors
+class(data$HID)
+class(data$EMPID)
+class(data$HomeHID)
+class(data$HomeHIDRegion)
+
+## be sure BDPTime is numeric so we can summ across it
+class(data$BDPTime)
+
+data.s3.1 <- group_by(data, EMPID, HomeHID, HomeHIDRegion, HID, Region)
+data.s3.1 <- summarise(data.s3.1, 
+                       Hours_Hosp = sum(BDPTime, na.rm = TRUE),
+                       Hours_HomeHID = sum(BDPTime[as.character(HomeHID) == as.character(HID)], na.rm = TRUE),
+                       Hours_Outside_Home_In_Region = sum(BDPTime[(as.character(HomeHID) != as.character(HID)) & as.character(HomeHIDRegion) == as.character(Region)], na.rm = TRUE),
+                       Hours_Outside_Home_Outside_Region = sum(BDPTime[(as.character(HomeHID) != as.character(HID)) & as.character(HomeHIDRegion) != as.character(Region)], na.rm = TRUE))
+                       
+
+# I'm not sure this is a relevant check for anything? just curiosity
+## 20 rows in which there are hours in a hospital outside the region of their home hospital.                       
+#nrow(subset(data.s3.1, Hours_Outside_Home_Outside_Region > 1))
+                     
+                       
+data.s3.2 <- group_by(data.s3.1, EMPID, HomeHID, HomeHIDRegion)
+data.s3.2 <- summarise(data.s3.2, 
+                      Total_Hours = sum(Hours_Hosp, na.rm = TRUE),
+                      Total_Hours_Home = sum(Hours_HomeHID, na.rm = TRUE),
+                      Total_Hours_Outside_Home_In_Region = sum(Hours_Outside_Home_In_Region, na.rm = TRUE),
+                      Total_Hours_Outside_Home_Outside_Region = sum(Hours_Outside_Home_Outside_Region, na.rm = TRUE))
+                      
+## let's make sure all the subsets of hours we created add up to the total number of hours
+data.s3.2 <- mutate(data.s3.2, Total_Check = (Total_Hours_Home + Total_Hours_Outside_Home_In_Region + Total_Hours_Outside_Home_Outside_Region))
+
+data.s3.2 <- mutate(data.s3.2, Check = round((Total_Hours - Total_Check),2))
+
+## this should be zero
+nrow(subset(data.s3.2, Check > 0))
+
+## calculating for each EMPID, the percentage of ours worked,
+# outside home and in the home region
+data.s3.2 <- mutate(data.s3.2, Perc_Hours_Outside_Home_In_Region = round(((Total_Hours_Outside_Home_In_Region / Total_Hours)*100),2))
+
+## selecting only relevant columns to report the scenario
+scenario3.1 <- select(data.s3.2, c("EMPID", "HomeHID", "HomeHIDRegion", "Perc_Hours_Outside_Home_In_Region"))                        
+                       
+## generating a second Scenario 3 that is at the level of Home Hospital
+# grouping by Home Hosptial
+data.s3.3 <- group_by(data.s3.2, HomeHID, HomeHIDRegion)
+
+# we're summarizing hours worked at that hospital (by RNs with a different home hospital within the Region)
+data.s3.3 <- summarise(data.s3.3, 
+                       Total_RN_Hours = sum(Total_Hours, na.rm = TRUE),
+                       Total_RN_Hours_Outside_Home_In_Region = sum(Total_Hours_Outside_Home_In_Region, na.rm = TRUE))
+
+# Final Scenario 3.2 shows the percent of hours worked at that hospital by RNs whose home is a different hopsital within that region.                       
+scenario3.2 <- mutate(data.s3.3, Percent_RN_Hours_Outside = round(((Total_RN_Hours_Outside_Home_In_Region / Total_RN_Hours)*100),2))                       
+                       
+scenario3.2 <- select(scenario3.2, c("HomeHID", "HomeHIDRegion", "Percent_RN_Hours_Outside"))                       
+
+colnames(scenario3.2)[3] <- "Percent_RN_Hours_From_NonResidents"
+
+
+##################################################################################
+################################ Scenario 4 ######################################
+##################################################################################
+
+## The % of RNs whose Home Hospital is NOT HID_X, but who worked at HID_X at least once during the last 13 weeks.
+
+## first be sure the variables across which we're summarizing are factors
+class(data$HID)
+class(data$EMPID)
+class(data$HomeHID)
+class(data$HomeHIDRegion)
+
+Num.RN <- length(unique(data$EMPID))
+
+## first, we need the total # of RNs whose home hospital is not X
+data.s4.1 <- group_by(data, EMPID, HID, Region, HomeHID, HomeHIDRegion)
+data.s4.1 <- summarise(data.s4.1, 
+                       Hours = sum(BDPTime, na.rm = TRUE))
+
+
+
+## this lists, for each hosptial, the number of employees that worked there,
+#(1. who have that as they're home hospital) & (2. who have a different home hopsital)
+
+data.s4.2 <- group_by(data.s4.1, HID, Region)
+data.s4.2 <- summarise(data.s4.2, 
+                       Total_RNs_Worked = n_distinct(EMPID),
+                       Total_RNs_Worked_Home = n_distinct(EMPID[as.character(HID) == as.character(HomeHID)]),
+                       Total_RNs_Worked_Not_Home = n_distinct(EMPID[as.character(HID) != as.character(HomeHID)]))
+                       
+
+## this lists, for each Hospital, the number of RNs whose Home Hospital, is not that one.
+data.s4.3 <- group_by(data, HomeHID)
+data.s4.3 <- summarise(data.s4.3,
+                       Num_Not_HomeHID = Num.RN - n_distinct(EMPID))
+
+## changing column name so that we can join in it
+colnames(data.s4.3)[1] <- "HID"
+                       
+## join the two datasets so within one dataset, we have for each hospital
+# the number of RNs that have a different home hospital
+# the number of RNs that worked there, that have a different home hospital
+
+data.s4.4 <- left_join(data.s4.2, data.s4.3, by = "HID")
+
+## replace all NAs in the right column - # of RNs who don't have this as a home hospital with
+# the total number of RNs. These hospitals at which RNs worked, is not listed as a home hospital to anyone.
+# right now, there are 47 of them.
+
+data.s4.4$Num_Not_HomeHID[is.na(data.s4.4$Num_Not_HomeHID)] <- Num.RN
+
+                       
+## calculating the percent of RNs who's home hopsital is not that one, that worked there.
+data.s4.4 <- mutate(data.s4.4, Perc_Of_NonResidents_That_Worked_Here = round((Total_RNs_Worked_Not_Home / Num_Not_HomeHID)*100,2))
+
+scenario4 <- select(data.s4.4, c("HID", "Region", "Perc_Of_NonResidents_That_Worked_Here"))
+
+
+##################################################################################
+################################ Scenario 5 ######################################
+##################################################################################
+
+
+## first, we need the total # of RNs whose home hospital is not X
+data.s5.1 <- group_by(data, EMPID, HID, Region, HomeHID, HomeHIDRegion)
+data.s5.1 <- summarise(data.s5.1, 
+                       Hours = sum(BDPTime, na.rm = TRUE))
+
+
+## now we need the total number of hours worked at each hospital
+data.s5.2 <- group_by(data.s5.1, HID, Region)
+data.s5.2 <- summarise(data.s5.2, 
+                       Total_Hours = sum(Hours, na.rm = TRUE))
+
+
+## number of hours at each hospital worked by: 
+#(1. RNs who have that as their home hospital) & (2. RNs who have a different home hospital)
+
+data.s5.3 <- group_by(data.s5.1, HID)
+data.s5.3 <- summarise(data.s5.3, 
+                       Total_Resident_Hours = sum(Hours[as.character(HID) == as.character(HomeHID)]),
+                       Total_NonResident_Hours = sum(Hours[as.character(HID) != as.character(HomeHID)]))
+                       
+## join the two datasets so we have # of total hours, resident hours, and non-resident hours in the same dataframe
+
+data.s5.4 <- left_join(data.s5.2, data.s5.3, by = "HID")
+
+## data check - let's make sure that non-resident + resident hours = total hours
+## all are approximately zero - so we're good!
+
+check <- mutate(data.s5.4, check = (Total_Resident_Hours+Total_NonResident_Hours) - Total_Hours)
+
+
+## let's caluclate the percent of total hours that are non-resident hours
+data.s5.4 <- mutate(data.s5.4, Perc_Hours_Worked_By_NonResidents = round((Total_NonResident_Hours / Total_Hours)*100, 2))
+
+## NA's mean that no hours were worked there, so let's make that clear
+
+
+data.s5.4$Perc_Hours_Worked_By_NonResidents[is.na(data.s5.4$Perc_Hours_Worked_By_NonResidents)] <- "No Hours Worked"
+
+## let's name it scenario and drop unneccesary columns
+scenario5 <- data.s5.4
+
+
+
+############# Export Scenarios for Review ###################
+
+write.csv(scenario1, file = "Scenario1.csv")
+write.csv(scenario2, file = "Scenario2.csv")
+write.csv(scenario3.1, file = "Scenario3_1.csv")
+write.csv(scenario3.2, file = "Scenario3_2.csv")
+write.csv(scenario4, file = "Scenario4.csv")
+write.csv(scenario5, file = "Scenario5.csv")
+
